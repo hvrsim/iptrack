@@ -5,12 +5,24 @@ import { getDb } from "@repo/data-ops/database/setup";
 import {
   CreateProjectSchema,
   DeleteProjectSchema,
+  AddProjectDomainSchema,
+  DeleteProjectDomainSchema,
+  ListProjectDomainsSchema,
   ListProjectEventsSchema,
+  ListProjectLocationsSchema,
+  ProjectOverviewSchema,
   RenameProjectSchema,
+  UpdateProjectDomainSchema,
   type CreateProjectInput,
+  type AddProjectDomainInput,
+  type DeleteProjectDomainInput,
+  type ListProjectDomainsInput,
   type DeleteProjectInput,
   type ListProjectEventsInput,
+  type ListProjectLocationsInput,
+  type ProjectOverviewInput,
   type RenameProjectInput,
+  type UpdateProjectDomainInput,
 } from "@repo/data-ops/zod-schema/projects";
 import { events, projectDomains, projects } from "@repo/data-ops/drizzle/schema";
 import { protectedFunctionMiddleware } from "@/core/middleware/auth";
@@ -187,12 +199,8 @@ export const listProjectEvents = baseFunction
     };
   });
 
-const ListProjectLocationsSchema = ProjectIdSchema.extend({
-  limit: z.number().int().min(1).max(100).default(30),
-});
-
 export const listProjectLocations = baseFunction
-  .inputValidator((data: z.infer<typeof ListProjectLocationsSchema>) =>
+  .inputValidator((data: ListProjectLocationsInput) =>
     ListProjectLocationsSchema.parse(data),
   )
   .handler(async (ctx) => {
@@ -243,10 +251,8 @@ export const listProjectLocations = baseFunction
     }));
   });
 
-const ProjectOverviewSchema = ProjectIdSchema;
-
 export const getProjectOverview = baseFunction
-  .inputValidator((data: z.infer<typeof ProjectOverviewSchema>) =>
+  .inputValidator((data: ProjectOverviewInput) =>
     ProjectOverviewSchema.parse(data),
   )
   .handler(async (ctx) => {
@@ -302,25 +308,8 @@ export const getProjectOverview = baseFunction
     };
   });
 
-const DomainValueSchema = z
-  .string()
-  .trim()
-  .min(1)
-  .max(255)
-  .refine((value) => {
-    const lower = value.toLowerCase();
-    const hostname =
-      /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9-]{2,63}$/i;
-    const wildcard =
-      /^\*\.(?=.{1,251}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9-]{2,63}$/i;
-    const local = lower === "localhost" || lower === "127.0.0.1";
-    return local || hostname.test(lower) || wildcard.test(lower);
-  }, "Invalid domain format");
-
-const ListProjectDomainsSchema = ProjectIdSchema;
-
 export const listProjectDomains = baseFunction
-  .inputValidator((data: z.infer<typeof ListProjectDomainsSchema>) =>
+  .inputValidator((data: ListProjectDomainsInput) =>
     ListProjectDomainsSchema.parse(data),
   )
   .handler(async (ctx) => {
@@ -350,12 +339,8 @@ export const listProjectDomains = baseFunction
     }));
   });
 
-const AddProjectDomainSchema = ProjectIdSchema.extend({
-  value: DomainValueSchema,
-});
-
 export const addProjectDomain = baseFunction
-  .inputValidator((data: z.infer<typeof AddProjectDomainSchema>) =>
+  .inputValidator((data: AddProjectDomainInput) =>
     AddProjectDomainSchema.parse(data),
   )
   .handler(async (ctx) => {
@@ -385,13 +370,8 @@ export const addProjectDomain = baseFunction
     return { id, value: wildcard ? `*.${hostname}` : hostname };
   });
 
-const UpdateProjectDomainSchema = ProjectIdSchema.extend({
-  id: z.string().min(1),
-  value: DomainValueSchema,
-});
-
 export const updateProjectDomain = baseFunction
-  .inputValidator((data: z.infer<typeof UpdateProjectDomainSchema>) =>
+  .inputValidator((data: UpdateProjectDomainInput) =>
     UpdateProjectDomainSchema.parse(data),
   )
   .handler(async (ctx) => {
@@ -423,12 +403,8 @@ export const updateProjectDomain = baseFunction
     return { id: ctx.data.id, value: wildcard ? `*.${hostname}` : hostname };
   });
 
-const DeleteProjectDomainSchema = ProjectIdSchema.extend({
-  id: z.string().min(1),
-});
-
 export const deleteProjectDomain = baseFunction
-  .inputValidator((data: z.infer<typeof DeleteProjectDomainSchema>) =>
+  .inputValidator((data: DeleteProjectDomainInput) =>
     DeleteProjectDomainSchema.parse(data),
   )
   .handler(async (ctx) => {

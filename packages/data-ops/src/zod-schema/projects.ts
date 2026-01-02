@@ -47,3 +47,59 @@ export const ListProjectEventsSchema = z.object({
 });
 
 export type ListProjectEventsInput = z.infer<typeof ListProjectEventsSchema>;
+
+export const ListProjectLocationsSchema = ProjectIdSchema.extend({
+  limit: z.number().int().min(1).max(100).default(30),
+});
+
+export type ListProjectLocationsInput = z.infer<
+  typeof ListProjectLocationsSchema
+>;
+
+export const ProjectOverviewSchema = ProjectIdSchema;
+
+export type ProjectOverviewInput = z.infer<typeof ProjectOverviewSchema>;
+
+export const DomainValueSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(255)
+  .refine((value) => {
+    const lower = value.toLowerCase();
+    const hostname =
+      /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9-]{2,63}$/i;
+    const wildcard =
+      /^\*\.(?=.{1,251}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9-]{2,63}$/i;
+    const local = lower === "localhost" || lower === "127.0.0.1";
+    return local || hostname.test(lower) || wildcard.test(lower);
+  }, "Invalid domain format");
+
+export const ListProjectDomainsSchema = ProjectIdSchema;
+
+export type ListProjectDomainsInput = z.infer<
+  typeof ListProjectDomainsSchema
+>;
+
+export const AddProjectDomainSchema = ProjectIdSchema.extend({
+  value: DomainValueSchema,
+});
+
+export type AddProjectDomainInput = z.infer<typeof AddProjectDomainSchema>;
+
+export const UpdateProjectDomainSchema = ProjectIdSchema.extend({
+  id: z.string().min(1),
+  value: DomainValueSchema,
+});
+
+export type UpdateProjectDomainInput = z.infer<
+  typeof UpdateProjectDomainSchema
+>;
+
+export const DeleteProjectDomainSchema = ProjectIdSchema.extend({
+  id: z.string().min(1),
+});
+
+export type DeleteProjectDomainInput = z.infer<
+  typeof DeleteProjectDomainSchema
+>;
