@@ -1,0 +1,21 @@
+{
+    "name": "iptrack",
+    "version": "1.0.1",
+    "description": "",
+    "scripts": {
+        "setup": "pnpm i && pnpm run build:data-ops",
+        "build:data-ops": "pnpm run --filter data-ops build",
+        "dev:web": "pnpm run --filter web dev",
+        "deploy:web": "pnpm run build:data-ops && pnpm run --filter web deploy",
+        "dev:collector": "pnpm run --filter collector dev",
+        "deploy:collector": "pnpm run build:data-ops && pnpm run --filter collector deploy"
+    },
+    "keywords": [],
+    "author": "",
+    "license": "MIT",
+    "packageManager": "pnpm@10.14.0",
+    "devDependencies": {
+        "@types/node": "^22.18.12",
+        "typescript": "^5.9.3"
+    }
+}

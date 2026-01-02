@@ -1,0 +1,24 @@
+{
+    "name": "collector",
+    "version": "1.0.1",
+    "private": true,
+    "scripts": {
+        "deploy": "wrangler deploy",
+        "dev": "wrangler dev --x-remote-bindings --persist-to ../web/.wrangler/state",
+        "start": "wrangler dev --persist-to ../web/.wrangler/state",
+        "test": "vitest",
+        "cf-typegen": "wrangler types --env-interface BaseEnv"
+    },
+    "devDependencies": {
+        "@cloudflare/vitest-pool-workers": "^0.8.19",
+        "@types/node": "^22.15.19",
+        "typescript": "^5.5.2",
+        "vitest": "~3.2.0",
+        "wrangler": "^4.24.3"
+    },
+    "dependencies": {
+        "@repo/data-ops": "workspace:*",
+        "drizzle-orm": "^0.44.5",
+        "hono": "^4.8.3"
+    }
+}

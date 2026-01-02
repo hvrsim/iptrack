@@ -1,0 +1,24 @@
+{
+    "$schema": "node_modules/wrangler/config-schema.json",
+    "name": "iptrack",
+    "compatibility_date": "2025-09-02",
+    "compatibility_flags": ["nodejs_compat"],
+    "main": "./src/server.ts",
+    "workers_dev": false,
+    "vars": {
+        "COLLECTOR_ORIGIN": "https://iptrack-collector.hvrsim.com"
+    },
+    "d1_databases": [
+        {
+            "binding": "DB",
+            "database_name": "iptrack_db",
+            "database_id": "2fc07ac4-014a-4690-ad3c-7939eb1b6e2e",
+        },
+    ],
+    "routes": [
+        {
+            "pattern": "iptrack.hvrsim.com",
+            "custom_domain": true,
+        },
+    ],
+}
