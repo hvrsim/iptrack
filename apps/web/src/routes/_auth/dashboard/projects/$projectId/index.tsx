@@ -321,6 +321,12 @@ function RouteComponent() {
     const [renameError, setRenameError] = React.useState<string | null>(null);
     const [renameDialogOpen, setRenameDialogOpen] = React.useState(false);
     const [deleteDialogOpen, setDeleteDialogOpen] = React.useState(false);
+    const [exportDialogOpen, setExportDialogOpen] = React.useState(false);
+    const [exportRange, setExportRange] = React.useState<
+        "day" | "week" | "month" | "all"
+    >("month");
+    const [exportError, setExportError] = React.useState<string | null>(null);
+    const [exporting, setExporting] = React.useState(false);
     const [newDomainError, setNewDomainError] = React.useState<string | null>(
         null,
     );
@@ -539,15 +545,104 @@ function RouteComponent() {
     };
 
     const handleExport = () => {
-        const blob = new Blob([JSON.stringify(events, null, 2)], {
-            type: "application/json",
-        });
-        const url = URL.createObjectURL(blob);
-        const anchor = document.createElement("a");
-        anchor.href = url;
-        anchor.download = `${projectId}-events.json`;
-        anchor.click();
-        URL.revokeObjectURL(url);
+        setExportDialogOpen(true);
+    };
+
+    const exportRanges = [
+        { value: "day", label: "Past day", description: "Last 24 hours" },
+        { value: "week", label: "Past week", description: "Last 7 days" },
+        { value: "month", label: "Past month", description: "Last 30 days" },
+        { value: "all", label: "All time", description: "Full history" },
+    ] as const;
+
+    const fetchEventsForExport = async () => {
+        const exportPageSize = 100;
+        let pageToFetch = 1;
+        let total = 0;
+        const allEvents: EventRow[] = [];
+
+        do {
+            const response = await listProjectEvents({
+                data: {
+                    projectId,
+                    page: pageToFetch,
+                    pageSize: exportPageSize,
+                    search: searchTerm || undefined,
+                    sortBy: "timestamp",
+                    sortDir: "desc",
+                },
+            });
+            total = response.total ?? 0;
+            const mapped = response.items.map((event) => ({
+                ...event,
+                timestamp:
+                    event.timestamp instanceof Date
+                        ? event.timestamp
+                        : new Date(event.timestamp),
+            }));
+            allEvents.push(...mapped);
+            pageToFetch += 1;
+        } while (allEvents.length < total);
+
+        return allEvents;
+    };
+
+    const handleExportConfirm = async (
+        range: "day" | "week" | "month" | "all",
+    ) => {
+        setExporting(true);
+        setExportError(null);
+        try {
+            const allEvents = await fetchEventsForExport();
+            const now = Date.now();
+            const cutoff = {
+                day: now - 24 * 60 * 60 * 1000,
+                week: now - 7 * 24 * 60 * 60 * 1000,
+                month: now - 30 * 24 * 60 * 60 * 1000,
+                all: null,
+            }[range];
+            const filteredEvents =
+                cutoff === null
+                    ? allEvents
+                    : allEvents.filter(
+                          (event) => event.timestamp.getTime() >= cutoff,
+                      );
+
+            const enabledColumns = columns
+                .filter((column) => visibleColumns[column.key])
+                .map((column) => column.key);
+
+            const exportRows = filteredEvents.map((event, index) => {
+                const row: Record<string, unknown> = { id: index + 1 };
+                enabledColumns.forEach((key) => {
+                    row[key] =
+                        key === "timestamp"
+                            ? event.timestamp.toISOString()
+                            : event[key];
+                });
+                return row;
+            });
+
+            const rangeSuffix = range;
+            const blob = new Blob([JSON.stringify(exportRows, null, 2)], {
+                type: "application/json",
+            });
+            const url = URL.createObjectURL(blob);
+            const anchor = document.createElement("a");
+            anchor.href = url;
+            anchor.download = `${projectId}-${rangeSuffix}.json`;
+            anchor.click();
+            URL.revokeObjectURL(url);
+            setExportDialogOpen(false);
+        } catch (error) {
+            setExportError(
+                error instanceof Error
+                    ? error.message
+                    : "Unable to export events right now.",
+            );
+        } finally {
+            setExporting(false);
+        }
     };
 
     const handleAddDomain = () => {
@@ -1110,6 +1205,70 @@ function RouteComponent() {
                             disabled={renameMutation.isPending}
                         >
                             Save name
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+            <Dialog
+                open={exportDialogOpen}
+                onOpenChange={(open) => {
+                    setExportDialogOpen(open);
+                    if (!open) {
+                        setExportError(null);
+                    }
+                }}
+            >
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Export events</DialogTitle>
+                        <DialogDescription>
+                            Choose the time range to export as JSON.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-3">
+                        <div className="grid gap-2">
+                            {exportRanges.map((range) => (
+                                <Button
+                                    key={range.value}
+                                    type="button"
+                                    variant={
+                                        exportRange === range.value
+                                            ? "default"
+                                            : "outline"
+                                    }
+                                    className="justify-between"
+                                    onClick={() =>
+                                        setExportRange(range.value)
+                                    }
+                                >
+                                    <span>{range.label}</span>
+                                    <span className="text-xs text-muted-foreground">
+                                        {range.description}
+                                    </span>
+                                </Button>
+                            ))}
+                        </div>
+                        {exportError && (
+                            <Alert>
+                                <AlertDescription>
+                                    {exportError}
+                                </AlertDescription>
+                            </Alert>
+                        )}
+                    </div>
+                    <DialogFooter>
+                        <Button
+                            variant="outline"
+                            onClick={() => setExportDialogOpen(false)}
+                            disabled={exporting}
+                        >
+                            Cancel
+                        </Button>
+                        <Button
+                            onClick={() => handleExportConfirm(exportRange)}
+                            disabled={exporting}
+                        >
+                            {exporting ? "Exporting..." : "Export JSON"}
                         </Button>
                     </DialogFooter>
                 </DialogContent>
