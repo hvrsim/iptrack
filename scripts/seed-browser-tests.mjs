@@ -1,0 +1,13 @@
+import { mkdir, writeFile } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
+await mkdir('.tmp', { recursive: true });
+const now = Date.now();
+let sql = `DELETE FROM auth_user;
+INSERT INTO auth_user(id,name,email,email_verified) VALUES ('browser-owner','Browser owner','browser@example.test',1),('other-owner','Other','other@example.test',1);
+INSERT INTO auth_session(id,expires_at,token,updated_at,user_id) VALUES ('browser-session',${now + 86400000},'local-browser-session',${now},'browser-owner'),('other-session',${now + 86400000},'local-other-session',${now},'other-owner');
+INSERT INTO projects(id,user_id,name) VALUES ('11111111-1111-4111-8111-111111111111','browser-owner','Browser project'),('22222222-2222-4222-8222-222222222222','other-owner','Other project');
+INSERT INTO project_domains(id,project_id,hostname) VALUES ('domain','11111111-1111-4111-8111-111111111111','example.com');\n`;
+for(let i = 0; i < 15; i++) sql += `INSERT INTO events(id,project_id,timestamp,ip_address,type,lat,lon,country) VALUES ('event-${String(i).padStart(2,'0')}','11111111-1111-4111-8111-111111111111',${now - 1000 * (i + 1)},'198.51.100.${i + 1}','unknown',20,10,'US');\n`;
+await writeFile('.tmp/browser-seed.sql', sql);
+execFileSync('pnpm', ['--filter','web','exec','wrangler','d1','migrations','apply','DB','--local','--config','test/wrangler.jsonc','--persist-to','../../.tmp/e2e-state'], { stdio:'inherit' });
+execFileSync('pnpm', ['--filter','web','exec','wrangler','d1','execute','DB','--local','--config','test/wrangler.jsonc','--persist-to','../../.tmp/e2e-state','--command',sql], { stdio:'inherit' });

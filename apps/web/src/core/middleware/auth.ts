@@ -1,3 +1,4 @@
+import { assertMutationRequest } from "../lib/mutation-request";
 import { getAuth } from "@repo/data-ops/auth/server";
 import { createMiddleware } from "@tanstack/react-start";
 import { getRequest } from "@tanstack/react-start/server";
@@ -30,4 +31,9 @@ export const protectedRequestMiddleware = createMiddleware({
 }).server(async ({ next }) => {
   const context = await getAuthContext();
   return next({ context });
+});
+
+export const mutationMiddleware = createMiddleware({ type: "function" }).server(async ({ next }) => {
+  assertMutationRequest(getRequest());
+  return next();
 });

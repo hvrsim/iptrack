@@ -32,7 +32,7 @@ export function HeroSection() {
               </Badge>
               <Badge variant="secondary">
                 <ShieldCheck className="mr-1 h-3 w-3" />
-                Privacy-First
+                Retention Controls
               </Badge>
             </div>
 
@@ -42,9 +42,9 @@ export function HeroSection() {
             </h1>
 
             <p className="mt-6 text-lg leading-8 text-muted-foreground max-w-2xl">
-              Understand visitors instantly with live event streams, precision
-              geo insights, and anomaly signals. Built for teams that need
-              depth, not just dashboards.
+              Understand initial page loads with an event history, approximate
+              locations, and per-project retention controls. Verify your
+              installation and explore incoming traffic.
             </p>
 
             <div className="mt-10 flex flex-col sm:flex-row items-start sm:items-center gap-4">
@@ -55,7 +55,7 @@ export function HeroSection() {
                 </Button>
               </Link>
 
-              <Link to="/#features">
+              <Link to="/" hash="features">
                 <Button variant="outline" size="lg">
                   Explore features
                 </Button>
@@ -65,15 +65,15 @@ export function HeroSection() {
             <div className="mt-10 flex flex-wrap gap-6 text-sm text-muted-foreground">
               <div className="flex items-center gap-2">
                 <Radar className="h-4 w-4 text-primary" />
-                Real-time event signal
+                Document-load analytics
               </div>
               <div className="flex items-center gap-2">
                 <Globe2 className="h-4 w-4 text-primary" />
-                City-level geo precision
+                Approximate IP locations
               </div>
               <div className="flex items-center gap-2">
                 <ShieldCheck className="h-4 w-4 text-primary" />
-                No PII storage
+                Raw IPs with configurable retention
               </div>
             </div>
           </div>

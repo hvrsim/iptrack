@@ -1,56 +1,15 @@
 # IP Track Collector
 
-Cloudflare Worker responsible for ingesting site visit events.
+Hono Worker with `GET /` health, `GET /main.js` initial-document-load script, and `POST /events` ingestion. Accepts `{ projectId, eventId?, timestamp? }` (legacy `project_id` is supported). Events use server receipt time. Request bodies are limited to 2 KB; domain validation, atomic rolling quotas, and event IDs protect ingestion.
 
-## Endpoints
+Immediate location enrichment uses Cloudflare request metadata. Optional `IP_API_KEY` enables HTTPS ip-api Pro classification through a durable outbox processed by cron. Cron also enforces per-project retention. Missing classification remains unknown.
 
-- `GET /`: simple health response.
-- `GET /main.js`: embeddable script that posts events to `/events`.
-- `POST /events`: ingests `{ projectId, timestamp }` (also accepts `project_id`).
-
-## Request Flow
-
-1. Parse and validate the event payload using shared Zod schemas from `@repo/data-ops`.
-2. Resolve the client IP via Cloudflare headers.
-3. Verify the request hostname matches a project domain in D1.
-4. Enrich with `ip-api.com` data and insert an event row.
-
-## Local Development
-
-From the repo root:
-
-```bash
-pnpm run dev:collector
-```
-
-Or within this folder:
+See the [root README](../../README.md) for local migrations/seeding, installation, privacy behavior, optional provider setup, limits, tests, and deployment.
 
 ```bash
 pnpm run dev
+pnpm test
+pnpm run typecheck
 ```
 
-The dev script persists local D1 state under `apps/web/.wrangler/state`.
-
-## Deployment
-
-Ensure `apps/collector/wrangler.jsonc` has the correct Worker name, route, and D1 database binding, then run:
-
-```bash
-pnpm run deploy:collector
-```
-
-Or within this folder:
-
-```bash
-pnpm run deploy
-```
-
-## Configuration
-
-- D1 database binding: `DB` (configured in `apps/collector/wrangler.jsonc`).
-- External dependency: `ip-api.com` for geo/network enrichment.
-
-## Source Layout
-
-- `apps/collector/src/index.ts`: Worker entrypoint.
-- `apps/collector/src/hono/app.ts`: Routes, validation, enrichment, and database writes.
+Local D1 state is shared with the web app under `apps/web/.wrangler/state`. Secrets belong in `.dev.vars` locally and Wrangler secrets in production. No production database access is needed for tests.

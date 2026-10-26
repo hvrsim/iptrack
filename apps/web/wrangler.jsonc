@@ -5,6 +5,7 @@
     "compatibility_flags": ["nodejs_compat"],
     "main": "./src/server.ts",
     "workers_dev": false,
+    "observability": { "enabled": true },
     "vars": {
         "COLLECTOR_ORIGIN": "https://iptrack-collector.hvrsim.com"
     },
@@ -12,6 +13,7 @@
         {
             "binding": "DB",
             "database_name": "iptrack_db",
+            "migrations_dir": "../../packages/data-ops/src/drizzle",
             "database_id": "2fc07ac4-014a-4690-ad3c-7939eb1b6e2e",
         },
     ],

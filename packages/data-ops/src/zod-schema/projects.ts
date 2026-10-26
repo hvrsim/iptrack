@@ -39,9 +39,9 @@ export const EventSortKeySchema = z.enum([
 
 export const ListProjectEventsSchema = z.object({
   projectId: z.string().min(1),
-  page: z.number().int().min(1).default(1),
+  page: z.number().int().min(1).max(1000000).default(1),
   pageSize: z.number().int().min(1).max(100).default(25),
-  search: z.string().trim().optional(),
+  search: z.string().trim().max(100).optional(),
   sortBy: EventSortKeySchema.default("timestamp"),
   sortDir: z.enum(["asc", "desc"]).default("desc"),
 });
@@ -103,3 +103,12 @@ export const DeleteProjectDomainSchema = ProjectIdSchema.extend({
 export type DeleteProjectDomainInput = z.infer<
   typeof DeleteProjectDomainSchema
 >;
+
+export const RetentionSchema = ProjectIdSchema.extend({
+  retentionDays: z.number().int().min(1).max(365),
+});
+export const ExportEventsSchema = ProjectIdSchema.extend({
+  range: z.enum(["day", "week", "month", "all"]),
+  search: z.string().trim().max(100).optional(),
+  columns: z.array(EventSortKeySchema).min(1).max(10),
+});

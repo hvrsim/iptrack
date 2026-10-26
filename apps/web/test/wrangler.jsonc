@@ -1,0 +1,19 @@
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "iptrack-local-browser-tests",
+  "main": "../src/server.ts",
+  "compatibility_date": "2025-09-02",
+  "compatibility_flags": ["nodejs_compat"],
+  "vars": {
+    "BETTER_AUTH_SECRET": "local-browser-tests-only-never-deploy-this-key",
+    "GITHUB_CLIENT_ID": "unused-local-test",
+    "GITHUB_CLIENT_SECRET": "unused-local-test",
+    "COLLECTOR_ORIGIN": "http://localhost:8787"
+  },
+  "d1_databases": [{
+    "binding": "DB",
+    "database_name": "iptrack_browser_tests",
+    "database_id": "00000000-0000-4000-8000-000000000001",
+    "migrations_dir": "../../../packages/data-ops/src/drizzle"
+  }]
+}

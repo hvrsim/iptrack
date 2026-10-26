@@ -1,265 +1,74 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import { eq } from "drizzle-orm";
+import { bodyLimit } from "hono/body-limit";
+import { eq, and, sql } from "drizzle-orm";
 import { initDatabase } from "@repo/data-ops/database/setup";
-import {
-    events,
-    projectDomains,
-    projects,
-} from "@repo/data-ops/drizzle/schema";
+import { events, projectDomains, projects, ingestionDiagnostics } from "@repo/data-ops/drizzle/schema";
 import { CollectorEventRequestSchema } from "@repo/data-ops/zod-schema/collector";
+import { getClientIp, getEdgeLocation, getRequestHostname, matchesDomain } from "../lib/visitor";
+import { collectorScript } from "../lib/script";
 
 export const app = new Hono<{ Bindings: Env }>();
-
-app.use(
-    "/events",
-    cors({
-        origin: "*",
-        allowMethods: ["POST", "OPTIONS"],
-        allowHeaders: ["content-type"],
-    }),
-);
-
-app.get("/main.js", (c) => {
-    const script = `
-(() => {
-  try {
-    const current = document.currentScript;
-    if (!current) return;
-    const projectId = current.getAttribute("data-project-id");
-    if (!projectId) return;
-    const payload = {
-      projectId,
-      timestamp: Date.now(),
-    };
-    const endpoint = new URL("/events", current.src).toString();
-    fetch(endpoint, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(payload),
-    }).catch(() => {});
-  } catch {
-    // Swallow errors to avoid breaking host pages.
-  }
-})();
-`.trim();
-
-    return c.text(script, 200, {
-        "content-type": "application/javascript; charset=utf-8",
-        "cache-control": "no-cache",
-    });
+app.use("/events", cors({ origin: "*", allowMethods: ["POST", "OPTIONS"], allowHeaders: ["content-type"] }));
+app.use("/events", bodyLimit({ maxSize: 2048, onError: c => c.json({ error: "Payload exceeds 2 KB" }, 413) }));
+app.get("/", c => c.json({ status: "ok" }));
+app.get("/main.js", c => c.text(collectorScript, 200, {
+  "content-type": "application/javascript; charset=utf-8", "cache-control": "public, max-age=300",
+}));
+app.onError((error, c) => {
+  console.error(JSON.stringify({ event: "collector_error", message: error.message }));
+  return c.json({ error: "Unable to store event" }, 503);
 });
 
-type IpApiResponse = {
-    status: "success" | "fail";
-    message?: string;
-    country?: string;
-    regionName?: string;
-    city?: string;
-    zip?: string;
-    isp?: string;
-    as?: string;
-    lat?: number;
-    lon?: number;
-    proxy?: boolean;
-    mobile?: boolean;
-    hosting?: boolean;
-};
+app.post("/events", async c => {
+  let payload: unknown;
+  try { payload = await c.req.json(); } catch (error) {
+    if (error instanceof Error && error.name === "BodyLimitError") return c.json({ error: "Payload exceeds 2 KB" }, 413);
+    return c.json({ error: "Invalid JSON payload" }, 400);
+  }
+  const parsed = CollectorEventRequestSchema.safeParse(payload);
+  if (!parsed.success) return c.json({ error: "Invalid project ID, event ID, or timestamp" }, 400);
+  const { projectId, timestamp, eventId: clientEventId } = parsed.data;
+  const now = Date.now();
+  const db = initDatabase(c.env.DB);
+  const project = await db.select({ id: projects.id }).from(projects).where(eq(projects.id, projectId)).get();
+  if (!project) return c.json({ error: "Project not found" }, 404);
 
-const IP_API_FIELDS =
-    "status,message,country,regionName,city,zip,isp,as,lat,lon,proxy,mobile,hosting";
+  const reject = async (reason: string, status: 400 | 403 | 429) => {
+    await db.insert(ingestionDiagnostics).values({ projectId, day: Math.floor(now / 86400000), reason, count: 1, lastAt: now })
+      .onConflictDoUpdate({ target: [ingestionDiagnostics.projectId, ingestionDiagnostics.day, ingestionDiagnostics.reason],
+        set: { count: sql`${ingestionDiagnostics.count} + 1`, lastAt: now } });
+    console.log(JSON.stringify({ event: "event_rejected", projectId, reason }));
+    if (status === 429) c.header("Retry-After", "60");
+    return c.json({ error: reason }, status);
+  };
+  const ipAddress = getClientIp(c.req.raw);
+  if (!ipAddress) return reject("Missing trusted client IP", 400);
+  const hostname = getRequestHostname(c.req.raw);
+  const domains = await db.select().from(projectDomains).where(eq(projectDomains.projectId, projectId));
+  if (!hostname || !domains.some(d => matchesDomain(hostname, d.hostname, d.wildcard))) return reject("Hostname not allowed for project", 403);
+  if (timestamp !== undefined && Math.abs(now - timestamp) > 5 * 60 * 1000) return reject("Client timestamp differs by more than five minutes", 400);
 
-const IPV4_REGEX =
-    /^(?:25[0-5]|2[0-4]\d|1?\d?\d)(?:\.(?:25[0-5]|2[0-4]\d|1?\d?\d)){3}$/;
-const IPV6_REGEX =
-    /^((?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}|(?:[0-9a-fA-F]{1,4}:){1,7}:|(?:[0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|(?:[0-9a-fA-F]{1,4}:){1,5}(?::[0-9a-fA-F]{1,4}){1,2}|(?:[0-9a-fA-F]{1,4}:){1,4}(?::[0-9a-fA-F]{1,4}){1,3}|(?:[0-9a-fA-F]{1,4}:){1,3}(?::[0-9a-fA-F]{1,4}){1,4}|(?:[0-9a-fA-F]{1,4}:){1,2}(?::[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:(?:(?::[0-9a-fA-F]{1,4}){1,6})|:(?:(?::[0-9a-fA-F]{1,4}){1,7}|:))$/;
-
-function isValidIpAddress(value: string) {
-    return IPV4_REGEX.test(value) || IPV6_REGEX.test(value);
-}
-
-function getClientIp(request: Request) {
-    const cfIpv4 = request.headers.get("CF-Connecting-IPV4");
-    if (cfIpv4 && IPV4_REGEX.test(cfIpv4)) {
-        return cfIpv4;
-    }
-    const cfIpv6 = request.headers.get("CF-Connecting-IPV6");
-    if (cfIpv6 && IPV6_REGEX.test(cfIpv6)) {
-        return cfIpv6;
-    }
-
-    const header =
-        request.headers.get("CF-Connecting-IP") ??
-        request.headers.get("X-Forwarded-For");
-
-    if (!header) {
-        return;
-    }
-
-    const first = header.split(",")[0]?.trim() ?? "";
-    if (first.startsWith("::ffff:")) {
-        const mapped = first.replace("::ffff:", "");
-        if (IPV4_REGEX.test(mapped)) {
-            return mapped;
-        }
-    }
-
-    return isValidIpAddress(first) ? first : undefined;
-}
-
-function getRequestHostname(request: Request) {
-    const origin = request.headers.get("Origin");
-    if (origin) {
-        try {
-            return new URL(origin).hostname;
-        } catch {
-            return;
-        }
-    }
-
-    const referer = request.headers.get("Referer");
-    if (referer) {
-        try {
-            return new URL(referer).hostname;
-        } catch {
-            return;
-        }
-    }
-
-    try {
-        return new URL(request.url).hostname;
-    } catch {
-        return;
-    }
-}
-
-function matchesDomain(hostname: string, domain: string, wildcard: boolean) {
-    const normalizedHost = hostname.trim().toLowerCase();
-    const normalizedDomain = domain.trim().toLowerCase().replace(/^\*\./, "");
-
-    if (!normalizedHost || !normalizedDomain) {
-        return false;
-    }
-
-    if (wildcard) {
-        return (
-            normalizedHost === normalizedDomain ||
-            normalizedHost.endsWith(`.${normalizedDomain}`)
-        );
-    }
-
-    return normalizedHost === normalizedDomain;
-}
-
-function getEventType(ipInfo: IpApiResponse) {
-    if (ipInfo.proxy) {
-        return "proxy";
-    }
-    if (ipInfo.mobile) {
-        return "mobile";
-    }
-    return "hosting";
-}
-
-app.post("/events", async (c) => {
-    let payload: unknown;
-    try {
-        payload = await c.req.json();
-    } catch {
-        return c.json({ error: "Invalid JSON payload" }, 400);
-    }
-
-    const parsedPayload = CollectorEventRequestSchema.safeParse(payload);
-    if (!parsedPayload.success) {
-        const issues = parsedPayload.error.issues;
-        const hasProjectIdIssue = issues.some(
-            (issue) => issue.path[0] === "projectId",
-        );
-        const hasTimestampIssue = issues.some(
-            (issue) => issue.path[0] === "timestamp",
-        );
-
-        if (hasProjectIdIssue) {
-            return c.json({ error: "projectId is required" }, 400);
-        }
-        if (hasTimestampIssue) {
-            return c.json({ error: "timestamp must be a number" }, 400);
-        }
-
-        return c.json({ error: "Invalid payload" }, 400);
-    }
-
-    const { projectId, timestamp: timestampMs } = parsedPayload.data;
-
-    const ipAddress = getClientIp(c.req.raw);
-    if (!ipAddress) {
-        return c.json({ error: "IP address required" }, 400);
-    }
-
-    const db = initDatabase(c.env.DB);
-    const project = await db
-        .select({ id: projects.id })
-        .from(projects)
-        .where(eq(projects.id, projectId))
-        .get();
-
-    if (!project) {
-        return c.json({ error: "Project not found" }, 404);
-    }
-
-    const requestHostname = getRequestHostname(c.req.raw);
-    if (!requestHostname) {
-        return c.json({ error: "Unable to determine request hostname" }, 400);
-    }
-
-    const domains = await db
-        .select({
-            hostname: projectDomains.hostname,
-            wildcard: projectDomains.wildcard,
-        })
-        .from(projectDomains)
-        .where(eq(projectDomains.projectId, projectId));
-
-    const isAllowedDomain = domains.some((domain) =>
-        matchesDomain(requestHostname, domain.hostname, domain.wildcard),
-    );
-
-    if (!isAllowedDomain) {
-        return c.json({ error: "Hostname not allowed for project" }, 403);
-    }
-
-    const ipApiUrl = `http://ip-api.com/json/${encodeURIComponent(
-        ipAddress,
-    )}?fields=${IP_API_FIELDS}`;
-    let ipInfo: IpApiResponse | null = null;
-    try {
-        const ipResponse = await fetch(ipApiUrl);
-        if (ipResponse.ok) {
-            const parsed = (await ipResponse.json()) as IpApiResponse;
-            ipInfo = parsed.status === "success" ? parsed : null;
-        }
-    } catch {
-        ipInfo = null;
-    }
-
-    const eventId = crypto.randomUUID();
-    const eventRecord = {
-        id: eventId,
-        projectId,
-        timestamp: new Date(timestampMs),
-        ipAddress,
-        type: ipInfo ? getEventType(ipInfo) : "hosting",
-        lat: ipInfo?.lat ?? null,
-        lon: ipInfo?.lon ?? null,
-        country: ipInfo?.country ?? null,
-        region: ipInfo?.regionName ?? null,
-        city: ipInfo?.city ?? null,
-        zip: ipInfo?.zip ?? null,
-        isp: ipInfo?.isp ?? null,
-        asName: ipInfo?.as ?? null,
-    };
-
-    await db.insert(events).values(eventRecord);
-
-    return c.json({ id: eventId }, 201);
+  // D1 serializes each SQL statement: quota checks and insert happen atomically.
+  // Legacy clients can omit eventId; new scripts reuse an ID for every retry.
+  const id = crypto.randomUUID();
+  const location = getEdgeLocation(c.req.raw.cf);
+  const status = c.env.IP_API_KEY ? "pending" : (location.country ? "edge" : "unavailable");
+  const result = await c.env.DB.prepare(`INSERT INTO events
+    (id, project_id, timestamp, ip_address, client_event_id, client_timestamp, type,
+     lat, lon, country, region, city, zip, isp, as_name, enrichment_status)
+    SELECT ?, ?, ?, ?, ?, ?, 'unknown', ?, ?, ?, ?, ?, ?, ?, ?, ?
+    WHERE (SELECT count(*) FROM events WHERE project_id = ? AND timestamp >= ? AND timestamp <= ?) < 1000
+      AND (SELECT count(*) FROM events WHERE project_id = ? AND ip_address = ? AND timestamp >= ? AND timestamp <= ?) < 60
+    ON CONFLICT(project_id, client_event_id) DO NOTHING`)
+    .bind(id, projectId, now, ipAddress, clientEventId ?? null, timestamp ?? null,
+      location.lat, location.lon, location.country, location.region, location.city, location.zip, location.isp, location.asName, status,
+      projectId, now - 60000, now, projectId, ipAddress, now - 60000, now).run();
+  if (!result.meta.changes) {
+    const duplicate = clientEventId ? await db.select({ id: events.id }).from(events)
+      .where(and(eq(events.projectId, projectId), eq(events.clientEventId, clientEventId))).get() : undefined;
+    if (duplicate) return c.json({ id: duplicate.id, duplicate: true }, 200);
+    return reject("Ingestion rate limit reached", 429);
+  }
+  return c.json({ id }, 201);
 });

@@ -44,7 +44,7 @@ export const Route = createRootRouteWithContext<{
         type: "image/svg+xml",
         href: "/logo.svg",
       },
-      { rel: "manifest", href: "/site.webmanifest", color: "#fffff" },
+      { rel: "manifest", href: "/manifest.json", color: "#fffff" },
       { rel: "icon", href: "/logo.svg" },
     ],
   }),
@@ -76,14 +76,14 @@ function RootComponent() {
 
 function RootDocument({ children }: { children: React.ReactNode }) {
   return (
-    <html>
+    <html lang="en">
       <head>
         <HeadContent />
       </head>
       <body>
         {children}
-        <TanStackRouterDevtools position="bottom-right" />
-        <ReactQueryDevtools buttonPosition="bottom-left" />
+        {import.meta.env.DEV && <TanStackRouterDevtools position="bottom-right" />}
+        {import.meta.env.DEV && <ReactQueryDevtools buttonPosition="bottom-left" />}
         <Scripts />
       </body>
     </html>

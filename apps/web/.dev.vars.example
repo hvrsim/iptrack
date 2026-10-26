@@ -1,0 +1,4 @@
+BETTER_AUTH_SECRET=replace-with-a-random-secret-at-least-32-characters
+GITHUB_CLIENT_ID=your-local-github-oauth-client-id
+GITHUB_CLIENT_SECRET=your-local-github-oauth-client-secret
+COLLECTOR_ORIGIN=http://localhost:8787

@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 import { tanstackStart } from "@tanstack/react-start/plugin/vite";
 import viteReact from "@vitejs/plugin-react";
@@ -19,6 +20,7 @@ const config = defineConfig({
     }),
     viteReact(),
     cloudflare({
+      ...(process.env.IPTRACK_E2E ? { configPath: "./test/wrangler.jsonc", persistState: { path: fileURLToPath(new URL("../../.tmp/e2e-state", import.meta.url)) } } : {}),
       viteEnvironment: {
         name: "ssr",
       },

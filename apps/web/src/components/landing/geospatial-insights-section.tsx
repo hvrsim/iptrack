@@ -17,8 +17,8 @@ export function GeospatialInsightsSection() {
             See geography, not just numbers
           </h2>
           <p className="mt-4 text-lg text-muted-foreground">
-            IP Track layers your traffic on a live map so you can connect
-            traffic spikes with real-world locations and routing shifts.
+            IP Track plots the latest 30 geolocated document loads. Locations
+            are approximate and refresh while your dashboard is active.
           </p>
         </div>
 
@@ -28,10 +28,10 @@ export function GeospatialInsightsSection() {
               <MapPinned className="h-5 w-5 text-primary" />
             </div>
             <h3 className="mt-4 text-lg font-semibold text-foreground">
-              Location density
+              Recent locations
             </h3>
             <p className="mt-2 text-sm text-muted-foreground">
-              Surface regional spikes, hotspots, and new markets at a glance.
+              Explore the approximate locations of your latest geolocated events.
             </p>
           </div>
           <div className="rounded-2xl border border-border/60 bg-background/80 p-6">
@@ -39,10 +39,10 @@ export function GeospatialInsightsSection() {
               <Radio className="h-5 w-5 text-primary" />
             </div>
             <h3 className="mt-4 text-lg font-semibold text-foreground">
-              Live routing signal
+              Network context
             </h3>
             <p className="mt-2 text-sm text-muted-foreground">
-              Detect proxy patterns, mobile surges, and ISP shifts in real time.
+              See network details when optional classification is available. Missing results stay unknown.
             </p>
           </div>
           <div className="rounded-2xl border border-border/60 bg-background/80 p-6">
@@ -50,10 +50,10 @@ export function GeospatialInsightsSection() {
               <Route className="h-5 w-5 text-primary" />
             </div>
             <h3 className="mt-4 text-lg font-semibold text-foreground">
-              Journey clarity
+              Document loads
             </h3>
             <p className="mt-2 text-sm text-muted-foreground">
-              Track how traffic flows from region to region and where it drops.
+              Count initial document loads. SPA route changes, sessions, and visitor journeys are not tracked.
             </p>
           </div>
         </div>

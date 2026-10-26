@@ -1,11 +1,7 @@
 import {
-  Activity,
-  Globe2,
-  Radar,
-  ShieldCheck,
   Layers3,
   Cable,
-  Bell,
+  Clock,
   FileDown,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -16,37 +12,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-
-const coreFeatures = [
-  {
-    icon: Globe2,
-    title: "Geospatial intelligence",
-    description:
-      "Pinpoint visitors by country, region, and city with a live map overlay and adaptive clustering.",
-    badge: "Geo Layer",
-  },
-  {
-    icon: Activity,
-    title: "Live event stream",
-    description:
-      "See every hit the moment it arrives. Filter by IP, provider, and device in real time.",
-    badge: "Realtime",
-  },
-  {
-    icon: Radar,
-    title: "Anomaly radar",
-    description:
-      "Spot proxies, spikes, and unusual routing paths before they become incidents.",
-    badge: "Signal",
-  },
-  {
-    icon: ShieldCheck,
-    title: "Privacy-first capture",
-    description:
-      "Collect actionable analytics without over-collecting personal data or storing PII.",
-    badge: "Compliant",
-  },
-];
 
 const workflowFeatures = [
   {
@@ -60,21 +25,21 @@ const workflowFeatures = [
     icon: Cable,
     title: "Collector scripts",
     description:
-      "Drop in a lightweight script and capture traffic across any domain in minutes.",
+      "Allow your site’s hostname, install one script, and verify the first document-load event.",
     badge: "Deploy",
   },
   {
-    icon: Bell,
-    title: "Alert-ready",
+    icon: Clock,
+    title: "Retention controls",
     description:
-      "Trigger alerts off geography shifts, unusual ISPs, or sudden surges.",
-    badge: "Ops",
+      "Keep event history for 1–365 days, or delete a project’s events when needed.",
+    badge: "Control",
   },
   {
     icon: FileDown,
     title: "Portable exports",
     description:
-      "Export raw event logs for deeper analysis or to feed internal pipelines.",
+      "Download event history for a chosen date range with stable event IDs.",
     badge: "Data",
   },
 ];

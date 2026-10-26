@@ -1,8 +1,10 @@
 import { createServerFn } from "@tanstack/react-start";
-import { eq, and, desc, asc, like, sql, isNotNull } from "drizzle-orm";
+import { eq, and, desc, asc, sql, isNotNull, gte, lt } from "drizzle-orm";
 import { env } from "cloudflare:workers";
-import { getDb } from "@repo/data-ops/database/setup";
+import { initDatabase } from "@repo/data-ops/database/setup";
 import {
+  RetentionSchema,
+  ProjectIdSchema,
   CreateProjectSchema,
   DeleteProjectSchema,
   AddProjectDomainSchema,
@@ -24,15 +26,17 @@ import {
   type RenameProjectInput,
   type UpdateProjectDomainInput,
 } from "@repo/data-ops/zod-schema/projects";
-import { events, projectDomains, projects } from "@repo/data-ops/drizzle/schema";
-import { protectedFunctionMiddleware } from "@/core/middleware/auth";
+import { events, projectDomains, projects, ingestionDiagnostics, enrichmentCache } from "@repo/data-ops/drizzle/schema";
+import { protectedFunctionMiddleware, mutationMiddleware } from "@/core/middleware/auth";
 
-const baseFunction = createServerFn().middleware([
+const baseFunction = createServerFn({ method: "GET" }).middleware([
   protectedFunctionMiddleware,
 ]);
 
+const mutationFunction = createServerFn({ method: "POST" }).middleware([mutationMiddleware, protectedFunctionMiddleware]);
+
 export const listProjects = baseFunction.handler(async (ctx) => {
-  const db = getDb();
+  const db = initDatabase(env.DB);
 
   return db
     .select({
@@ -45,12 +49,12 @@ export const listProjects = baseFunction.handler(async (ctx) => {
     .orderBy(desc(projects.createdAt));
 });
 
-export const createProject = baseFunction
+export const createProject = mutationFunction
   .inputValidator((data: CreateProjectInput) =>
     CreateProjectSchema.parse(data),
   )
   .handler(async (ctx) => {
-    const db = getDb();
+    const db = initDatabase(env.DB);
     const now = new Date();
     const project = {
       id: crypto.randomUUID(),
@@ -63,12 +67,12 @@ export const createProject = baseFunction
     return project;
   });
 
-export const deleteProject = baseFunction
+export const deleteProject = mutationFunction
   .inputValidator((data: DeleteProjectInput) =>
     DeleteProjectSchema.parse(data),
   )
   .handler(async (ctx) => {
-    const db = getDb();
+    const db = initDatabase(env.DB);
 
     const project = await db
       .select({ id: projects.id })
@@ -86,7 +90,9 @@ export const deleteProject = baseFunction
     }
 
     await db.batch([
+      db.delete(enrichmentCache).where(sql`${enrichmentCache.ipAddress} in (select ip_address from events where project_id = ${project.id})`),
       db.delete(events).where(eq(events.projectId, project.id)),
+      db.delete(ingestionDiagnostics).where(eq(ingestionDiagnostics.projectId, project.id)),
       db.delete(projectDomains).where(eq(projectDomains.projectId, project.id)),
       db.delete(projects).where(eq(projects.id, project.id)),
     ]);
@@ -94,12 +100,12 @@ export const deleteProject = baseFunction
     return { success: true };
   });
 
-export const renameProject = baseFunction
+export const renameProject = mutationFunction
   .inputValidator((data: RenameProjectInput) =>
     RenameProjectSchema.parse(data),
   )
   .handler(async (ctx) => {
-    const db = getDb();
+    const db = initDatabase(env.DB);
     const trimmedName = ctx.data.name.trim();
 
     await db
@@ -115,10 +121,10 @@ export const renameProject = baseFunction
 function assertProjectOwner(
   projectId: string,
   userId: string,
-  db: ReturnType<typeof getDb>,
+  db: ReturnType<typeof initDatabase>,
 ) {
   return db
-    .select({ id: projects.id })
+    .select({ id: projects.id, retentionDays: projects.retentionDays })
     .from(projects)
     .where(and(eq(projects.id, projectId), eq(projects.userId, userId)))
     .get();
@@ -129,9 +135,7 @@ export const listProjectEvents = baseFunction
     ListProjectEventsSchema.parse(data),
   )
   .handler(async (ctx) => {
-    const db = getDb();
-    const latColumn = (events as { lat?: typeof events.timestamp }).lat;
-    const lonColumn = (events as { lon?: typeof events.timestamp }).lon;
+    const db = initDatabase(env.DB);
     const project = await assertProjectOwner(
       ctx.data.projectId,
       ctx.context.userId,
@@ -145,7 +149,9 @@ export const listProjectEvents = baseFunction
     const searchTerm = ctx.data.search?.toLowerCase();
     const filters = [
       eq(events.projectId, ctx.data.projectId),
-      searchTerm ? like(events.ipAddress, `%${searchTerm}%`) : undefined,
+      gte(events.timestamp, new Date(Date.now() - project.retentionDays * 86400000)),
+      lt(events.timestamp, new Date(Date.now())),
+      searchTerm ? sql`instr(${events.ipAddress}, ${searchTerm}) > 0` : undefined,
     ].filter(Boolean);
 
     const sortColumn = {
@@ -170,6 +176,8 @@ export const listProjectEvents = baseFunction
           timestamp: events.timestamp,
           ipAddress: events.ipAddress,
           type: events.type,
+          proxy: events.proxy, mobile: events.mobile, hosting: events.hosting,
+          enrichmentStatus: events.enrichmentStatus,
           country: events.country,
           region: events.region,
           city: events.city,
@@ -179,7 +187,7 @@ export const listProjectEvents = baseFunction
         })
         .from(events)
         .where(and(...filters))
-        .orderBy(orderBy(sortColumn))
+        .orderBy(orderBy(sortColumn), orderBy(events.id))
         .limit(ctx.data.pageSize)
         .offset(offset),
       db
@@ -204,9 +212,7 @@ export const listProjectLocations = baseFunction
     ListProjectLocationsSchema.parse(data),
   )
   .handler(async (ctx) => {
-    const db = getDb();
-    const latColumn = (events as { lat?: typeof events.timestamp }).lat;
-    const lonColumn = (events as { lon?: typeof events.timestamp }).lon;
+    const db = initDatabase(env.DB);
     const project = await assertProjectOwner(
       ctx.data.projectId,
       ctx.context.userId,
@@ -217,25 +223,24 @@ export const listProjectLocations = baseFunction
       throw new Error("Project not found");
     }
 
-    if (!latColumn || !lonColumn) {
-      return [];
-    }
-
     const items = await db
       .select({
         id: events.id,
-        lat: latColumn,
-        lon: lonColumn,
+        lat: events.lat,
+        lon: events.lon,
         ipAddress: events.ipAddress,
         timestamp: events.timestamp,
         type: events.type,
+        mobile: events.mobile,
       })
       .from(events)
       .where(
         and(
           eq(events.projectId, ctx.data.projectId),
-          isNotNull(latColumn),
-          isNotNull(lonColumn),
+          gte(events.timestamp, new Date(Date.now() - project.retentionDays * 86400000)),
+          lt(events.timestamp, new Date(Date.now())),
+          isNotNull(events.lat),
+          isNotNull(events.lon),
         ),
       )
       .orderBy(desc(events.timestamp))
@@ -247,7 +252,7 @@ export const listProjectLocations = baseFunction
       lon: item.lon ?? 0,
       ipAddress: item.ipAddress,
       visitedAt: item.timestamp,
-      mobile: item.type === "mobile",
+      mobile: item.mobile,
     }));
   });
 
@@ -256,9 +261,9 @@ export const getProjectOverview = baseFunction
     ProjectOverviewSchema.parse(data),
   )
   .handler(async (ctx) => {
-    const db = getDb();
+    const db = initDatabase(env.DB);
     const project = await db
-      .select({ id: projects.id, name: projects.name })
+      .select({ id: projects.id, name: projects.name, retentionDays: projects.retentionDays })
       .from(projects)
       .where(and(eq(projects.id, ctx.data.projectId), eq(projects.userId, ctx.context.userId)))
       .get();
@@ -267,44 +272,26 @@ export const getProjectOverview = baseFunction
       throw new Error("Project not found");
     }
 
-    const sinceMs = Date.now() - 30 * 24 * 60 * 60 * 1000;
-
-    const [total, mobile, uniqueIps] = await Promise.all([
-      db
-        .select({ count: sql<number>`count(*)` })
-        .from(events)
-        .where(
-          and(eq(events.projectId, project.id), sql`${events.timestamp} >= ${sinceMs}`),
-        )
-        .get(),
-      db
-        .select({ count: sql<number>`count(*)` })
-        .from(events)
-        .where(
-          and(
-            eq(events.projectId, project.id),
-            eq(events.type, "mobile"),
-            sql`${events.timestamp} >= ${sinceMs}`,
-          ),
-        )
-        .get(),
-      db
-        .select({ count: sql<number>`count(distinct ${events.ipAddress})` })
-        .from(events)
-        .where(
-          and(eq(events.projectId, project.id), sql`${events.timestamp} >= ${sinceMs}`),
-        )
-        .get(),
+    const now = Date.now();
+    const sinceMs = now - Math.min(30, project.retentionDays) * 86400000;
+    const [summary, lastEvent, diagnostics, domains] = await Promise.all([
+      db.select({
+        total: sql<number>`count(*)`,
+        mobile: sql<number>`coalesce(sum(case when ${events.mobile} = 1 then 1 else 0 end), 0)`,
+        classified: sql<number>`count(${events.mobile})`,
+        uniqueIps: sql<number>`count(distinct ${events.ipAddress})`,
+      }).from(events).where(and(eq(events.projectId, project.id), gte(events.timestamp, new Date(sinceMs)), lt(events.timestamp, new Date(now)))).get(),
+      db.select({ timestamp: events.timestamp }).from(events).where(and(eq(events.projectId, project.id), gte(events.timestamp, new Date(now - project.retentionDays * 86400000)), lt(events.timestamp, new Date(now))))
+        .orderBy(desc(events.timestamp), desc(events.id)).limit(1).get(),
+      db.select().from(ingestionDiagnostics).where(and(eq(ingestionDiagnostics.projectId, project.id), gte(ingestionDiagnostics.day, Math.floor(now / 86400000) - 1))),
+      db.select({ id: projectDomains.id }).from(projectDomains).where(eq(projectDomains.projectId, project.id)),
     ]);
-
     return {
-      projectId: project.id,
-      name: project.name,
-      totalEvents: total?.count ?? 0,
-      mobileEvents: mobile?.count ?? 0,
-      uniqueIps: uniqueIps?.count ?? 0,
-      collectorOrigin: env.COLLECTOR_ORIGIN ?? "",
-      since: new Date(sinceMs),
+      projectId: project.id, name: project.name, retentionDays: project.retentionDays,
+      totalEvents: summary?.total ?? 0, mobileEvents: summary?.mobile ?? 0,
+      classifiedEvents: summary?.classified ?? 0, uniqueIps: summary?.uniqueIps ?? 0,
+      lastEventAt: lastEvent?.timestamp ?? null, diagnostics, domainCount: domains.length,
+      collectorOrigin: env.COLLECTOR_ORIGIN ?? "", since: new Date(sinceMs),
     };
   });
 
@@ -313,7 +300,7 @@ export const listProjectDomains = baseFunction
     ListProjectDomainsSchema.parse(data),
   )
   .handler(async (ctx) => {
-    const db = getDb();
+    const db = initDatabase(env.DB);
     const project = await assertProjectOwner(
       ctx.data.projectId,
       ctx.context.userId,
@@ -339,12 +326,12 @@ export const listProjectDomains = baseFunction
     }));
   });
 
-export const addProjectDomain = baseFunction
+export const addProjectDomain = mutationFunction
   .inputValidator((data: AddProjectDomainInput) =>
     AddProjectDomainSchema.parse(data),
   )
   .handler(async (ctx) => {
-    const db = getDb();
+    const db = initDatabase(env.DB);
     const project = await assertProjectOwner(
       ctx.data.projectId,
       ctx.context.userId,
@@ -370,12 +357,12 @@ export const addProjectDomain = baseFunction
     return { id, value: wildcard ? `*.${hostname}` : hostname };
   });
 
-export const updateProjectDomain = baseFunction
+export const updateProjectDomain = mutationFunction
   .inputValidator((data: UpdateProjectDomainInput) =>
     UpdateProjectDomainSchema.parse(data),
   )
   .handler(async (ctx) => {
-    const db = getDb();
+    const db = initDatabase(env.DB);
     const project = await assertProjectOwner(
       ctx.data.projectId,
       ctx.context.userId,
@@ -403,12 +390,12 @@ export const updateProjectDomain = baseFunction
     return { id: ctx.data.id, value: wildcard ? `*.${hostname}` : hostname };
   });
 
-export const deleteProjectDomain = baseFunction
+export const deleteProjectDomain = mutationFunction
   .inputValidator((data: DeleteProjectDomainInput) =>
     DeleteProjectDomainSchema.parse(data),
   )
   .handler(async (ctx) => {
-    const db = getDb();
+    const db = initDatabase(env.DB);
     const project = await assertProjectOwner(
       ctx.data.projectId,
       ctx.context.userId,
@@ -430,3 +417,21 @@ export const deleteProjectDomain = baseFunction
 
     return { success: true };
   });
+
+export const updateRetention = mutationFunction.inputValidator(data => RetentionSchema.parse(data)).handler(async ctx => {
+  const db = initDatabase(env.DB);
+  if (!await assertProjectOwner(ctx.data.projectId, ctx.context.userId, db)) throw new Error("Project not found");
+  await db.update(projects).set({ retentionDays: ctx.data.retentionDays }).where(eq(projects.id, ctx.data.projectId));
+  return { success: true };
+});
+
+export const deleteProjectEvents = mutationFunction.inputValidator(data => ProjectIdSchema.parse(data)).handler(async ctx => {
+  const db = initDatabase(env.DB);
+  if (!await assertProjectOwner(ctx.data.projectId, ctx.context.userId, db)) throw new Error("Project not found");
+  await db.batch([
+    db.delete(enrichmentCache).where(sql`${enrichmentCache.ipAddress} in (select ip_address from events where project_id = ${ctx.data.projectId})`),
+    db.delete(events).where(eq(events.projectId, ctx.data.projectId)),
+    db.delete(ingestionDiagnostics).where(eq(ingestionDiagnostics.projectId, ctx.data.projectId)),
+  ]);
+  return { success: true };
+});

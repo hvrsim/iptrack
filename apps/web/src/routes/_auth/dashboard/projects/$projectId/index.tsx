@@ -1,8 +1,6 @@
 import * as React from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { createPortal } from "react-dom";
-import { MapContainer, TileLayer, useMap } from "react-leaflet";
 import {
     ArrowLeft,
     ChevronLeft,
@@ -28,11 +26,6 @@ import {
     DialogHeader,
     DialogTitle,
 } from "@/components/ui/dialog";
-import {
-    HoverCard,
-    HoverCardContent,
-    HoverCardTrigger,
-} from "@/components/ui/hover-card";
 import { Input } from "@/components/ui/input";
 import {
     Empty,
@@ -79,10 +72,11 @@ import {
     listProjectLocations,
     renameProject,
     updateProjectDomain,
+    updateRetention,
+    deleteProjectEvents,
 } from "@/core/functions/projects";
 import { seo } from "@/utils/seo";
 
-import "leaflet/dist/leaflet.css";
 
 export const Route = createFileRoute("/_auth/dashboard/projects/$projectId/")({
     head: () => ({
@@ -149,7 +143,8 @@ type EventRow = {
     id: string;
     timestamp: Date;
     ipAddress: string;
-    type: "proxy" | "mobile" | "hosting";
+    type: string;
+    proxy: boolean | null; mobile: boolean | null; hosting: boolean | null; enrichmentStatus: string;
     country: string | null;
     region: string | null;
     city: string | null;
@@ -163,135 +158,36 @@ type DomainRow = {
     value: string;
 };
 
-type LocationPoint = {
-    id: string;
-    lat: number;
-    lng: number;
-    ipAddress: string;
-    visitedAt: Date;
-    mobile: boolean;
-};
-
-function MapMarkersOverlay({ points }: { points: LocationPoint[] }) {
-    const map = useMap();
-    const [version, setVersion] = React.useState(0);
-    const containerRef = React.useRef<HTMLDivElement | null>(null);
-
-    React.useEffect(() => {
-        const container = document.createElement("div");
-        container.className = "absolute inset-0 z-[500] overflow-hidden";
-        map.getContainer().appendChild(container);
-        containerRef.current = container;
-
-        const bump = () => setVersion((value) => value + 1);
-        map.on("move", bump);
-        map.on("zoom", bump);
-        map.on("resize", bump);
-
-        return () => {
-            map.off("move", bump);
-            map.off("zoom", bump);
-            map.off("resize", bump);
-            container.remove();
-            containerRef.current = null;
-        };
-    }, [map]);
-
-    if (!containerRef.current) {
-        return null;
-    }
-
-    return createPortal(
-        <div className="absolute inset-0">
-            {points.map((point) => {
-                const position = map.latLngToContainerPoint([
-                    point.lat,
-                    point.lng,
-                ]);
-                if (
-                    !Number.isFinite(position.x) ||
-                    !Number.isFinite(position.y)
-                ) {
-                    return null;
-                }
-                return (
-                    <div
-                        key={`${point.id}-${version}`}
-                        className="pointer-events-auto absolute"
-                        style={{
-                            left: position.x,
-                            top: position.y,
-                            transform: "translate(-50%, -50%)",
-                        }}
-                    >
-                        <HoverCard openDelay={80} closeDelay={80}>
-                            <HoverCardTrigger asChild>
-                                <button
-                                    type="button"
-                                    className="h-2.5 w-2.5 rounded-full border border-background bg-emerald-500 shadow-[0_0_0_2px_rgba(16,185,129,0.35)]"
-                                    aria-label={`Event ${point.ipAddress}`}
-                                />
-                            </HoverCardTrigger>
-                            <HoverCardContent className="z-[1000] w-[22rem] max-w-[95vw]">
-                                <div className="space-y-2 text-sm">
-                                    <div className="font-medium text-foreground">
-                                        {formatEventDate(point.visitedAt)}
-                                    </div>
-                                    <div className="text-muted-foreground">
-                                        IP:{" "}
-                                        <span className="block break-all text-foreground">
-                                            {point.ipAddress}
-                                        </span>
-                                    </div>
-                                    <div className="text-muted-foreground">
-                                        Mobile:{" "}
-                                        <span className="text-foreground">
-                                            {point.mobile ? "Yes" : "No"}
-                                        </span>
-                                    </div>
-                                </div>
-                            </HoverCardContent>
-                        </HoverCard>
-                    </div>
-                );
-            })}
-        </div>,
-        containerRef.current,
-    );
-}
-
+const TrafficMap = React.lazy(() => import("@/components/projects/traffic-map"));
+type LocationPoint = React.ComponentProps<typeof TrafficMap>["points"][number];
 function MapPanel({ points }: { points: LocationPoint[] }) {
     const [mounted, setMounted] = React.useState(false);
+    React.useEffect(() => setMounted(true), []);
+    return mounted ? <React.Suspense fallback={<p className="p-6">Loading map…</p>}><TrafficMap points={points} /></React.Suspense> : <p className="p-6">Loading map…</p>;
+}
+
+function QueryStatus({ loading, error, retry }: { loading: boolean; error: Error | null; retry: () => void }) {
+    if (error) return <Alert role="alert"><AlertDescription>Unable to load data: {error.message} <Button variant="outline" onClick={retry}>Retry</Button></AlertDescription></Alert>;
+    return loading ? <p role="status" className="p-4">Loading…</p> : null;
+}
+
+function WaitingForFirstEvent() {
+    const [dots, setDots] = React.useState(1);
 
     React.useEffect(() => {
-        setMounted(true);
+        const interval = window.setInterval(() => {
+            setDots(value => (value + 1) % 4);
+        }, 500);
+        return () => window.clearInterval(interval);
     }, []);
 
-    if (!mounted) {
-        return (
-            <div className="flex h-[320px] items-center justify-center text-sm text-muted-foreground">
-                Loading map...
-            </div>
-        );
-    }
-
     return (
-        <div className="relative h-[320px] w-full">
-            <MapContainer
-                center={[20, 0]}
-                zoom={2}
-                minZoom={2}
-                maxZoom={6}
-                scrollWheelZoom
-                className="h-full w-full rounded-b-lg"
-            >
-                <TileLayer
-                    attribution="&copy; OpenStreetMap contributors"
-                    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                />
-                <MapMarkersOverlay points={points} />
-            </MapContainer>
-        </div>
+        <p role="status">
+            Waiting for the first event
+            <span aria-hidden="true" className="inline-block w-4">
+                {".".repeat(dots)}
+            </span>
+        </p>
     );
 }
 
@@ -302,7 +198,7 @@ function RouteComponent() {
     const [copied, setCopied] = React.useState(false);
     const [searchTerm, setSearchTerm] = React.useState("");
     const [sortConfig, setSortConfig] = React.useState<{
-        key: keyof EventRow;
+        key: "timestamp" | "ipAddress" | "type" | "country" | "region" | "city" | "zip" | "isp" | "asName";
         direction: "asc" | "desc";
     }>({ key: "timestamp", direction: "desc" });
     const [page, setPage] = React.useState(1);
@@ -326,7 +222,9 @@ function RouteComponent() {
         "day" | "week" | "month" | "all"
     >("month");
     const [exportError, setExportError] = React.useState<string | null>(null);
-    const [exporting, setExporting] = React.useState(false);
+    const [purgeDialogOpen, setPurgeDialogOpen] = React.useState(false);
+    const [domainError, setDomainError] = React.useState<string | null>(null);
+    const [retentionDays, setRetentionDays] = React.useState(30);
     const [newDomainError, setNewDomainError] = React.useState<string | null>(
         null,
     );
@@ -338,6 +236,7 @@ function RouteComponent() {
     const overviewQuery = useQuery({
         queryKey: ["project-overview", projectId],
         queryFn: () => getProjectOverview({ data: { projectId } }),
+        refetchInterval: 10000,
     });
 
     const eventsQuery = useQuery({
@@ -354,12 +253,13 @@ function RouteComponent() {
                 },
             }),
         refetchInterval: 10000,
-        refetchIntervalInBackground: true,
+        placeholderData: keepPreviousData,
     });
 
     const locationsQuery = useQuery({
         queryKey: ["project-locations", projectId],
         queryFn: () => listProjectLocations({ data: { projectId, limit: 30 } }),
+        refetchInterval: 10000,
     });
 
     const domainsQuery = useQuery({
@@ -373,6 +273,10 @@ function RouteComponent() {
         }
     }, [domainsQuery.data]);
 
+    React.useEffect(() => { if (overviewQuery.data) setRetentionDays(overviewQuery.data.retentionDays); }, [overviewQuery.data?.retentionDays]);
+    const refreshAnalytics = async () => { await Promise.all(["project-overview", "project-events", "project-locations"].map(key => queryClient.invalidateQueries({ queryKey: [key, projectId] }))); };
+    const retentionMutation = useMutation({ mutationFn: updateRetention, onSuccess: refreshAnalytics });
+    const purgeMutation = useMutation({ mutationFn: deleteProjectEvents, onSuccess: async () => { setPurgeDialogOpen(false); await refreshAnalytics(); } });
     const deleteMutation = useMutation({
         mutationFn: deleteProject,
         onSuccess: () => {
@@ -384,6 +288,7 @@ function RouteComponent() {
     const renameMutation = useMutation({
         mutationFn: renameProject,
         onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ["project-overview", projectId] });
             setRenameValue("");
             setRenameError(null);
             queryClient.invalidateQueries({ queryKey: ["projects"] });
@@ -397,28 +302,37 @@ function RouteComponent() {
 
     const addDomainMutation = useMutation({
         mutationFn: addProjectDomain,
+        onError: error => setDomainError(error.message),
         onSuccess: () => {
             queryClient.invalidateQueries({
                 queryKey: ["project-domains", projectId],
             });
+            queryClient.invalidateQueries({ queryKey: ["project-overview", projectId] });
+            setDomainError(null);
         },
     });
 
     const updateDomainMutation = useMutation({
         mutationFn: updateProjectDomain,
+        onError: error => { setDomainError(error.message); setDomains(domainsQuery.data ?? []); },
         onSuccess: () => {
             queryClient.invalidateQueries({
                 queryKey: ["project-domains", projectId],
             });
+            queryClient.invalidateQueries({ queryKey: ["project-overview", projectId] });
+            setDomainError(null);
         },
     });
 
     const deleteDomainMutation = useMutation({
         mutationFn: deleteProjectDomain,
+        onError: error => setDomainError(error.message),
         onSuccess: () => {
             queryClient.invalidateQueries({
                 queryKey: ["project-domains", projectId],
             });
+            queryClient.invalidateQueries({ queryKey: ["project-overview", projectId] });
+            setDomainError(null);
         },
     });
 
@@ -450,7 +364,7 @@ function RouteComponent() {
                 key: "type" as const,
                 label: "Type",
                 render: (event: EventRow) => (
-                    <Badge variant="outline">{event.type}</Badge>
+                    <span><Badge variant="outline">{event.type}</Badge><span className="block text-xs text-muted-foreground">Proxy: {event.proxy === null ? "unknown" : event.proxy ? "yes" : "no"} · Mobile: {event.mobile === null ? "unknown" : event.mobile ? "yes" : "no"} · Hosting: {event.hosting === null ? "unknown" : event.hosting ? "yes" : "no"} · {event.enrichmentStatus}</span></span>
                 ),
                 sortValue: (event: EventRow) => event.type,
             },
@@ -509,10 +423,10 @@ function RouteComponent() {
     }, [searchTerm, sortConfig]);
 
     React.useEffect(() => {
-        if (page > totalPages) {
+        if (eventsQuery.isSuccess && !eventsQuery.isPlaceholderData && page > totalPages) {
             setPage(totalPages);
         }
-    }, [page, totalPages]);
+    }, [page, totalPages, eventsQuery.isSuccess, eventsQuery.isPlaceholderData]);
 
     const locations: LocationPoint[] =
         locationsQuery.data
@@ -555,94 +469,16 @@ function RouteComponent() {
         { value: "all", label: "All time", description: "Full history" },
     ] as const;
 
-    const fetchEventsForExport = async () => {
-        const exportPageSize = 100;
-        let pageToFetch = 1;
-        let total = 0;
-        const allEvents: EventRow[] = [];
-
-        do {
-            const response = await listProjectEvents({
-                data: {
-                    projectId,
-                    page: pageToFetch,
-                    pageSize: exportPageSize,
-                    search: searchTerm || undefined,
-                    sortBy: "timestamp",
-                    sortDir: "desc",
-                },
-            });
-            total = response.total ?? 0;
-            const mapped = response.items.map((event) => ({
-                ...event,
-                timestamp:
-                    event.timestamp instanceof Date
-                        ? event.timestamp
-                        : new Date(event.timestamp),
-            }));
-            allEvents.push(...mapped);
-            pageToFetch += 1;
-        } while (allEvents.length < total);
-
-        return allEvents;
-    };
-
-    const handleExportConfirm = async (
-        range: "day" | "week" | "month" | "all",
-    ) => {
-        setExporting(true);
-        setExportError(null);
-        try {
-            const allEvents = await fetchEventsForExport();
-            const now = Date.now();
-            const cutoff = {
-                day: now - 24 * 60 * 60 * 1000,
-                week: now - 7 * 24 * 60 * 60 * 1000,
-                month: now - 30 * 24 * 60 * 60 * 1000,
-                all: null,
-            }[range];
-            const filteredEvents =
-                cutoff === null
-                    ? allEvents
-                    : allEvents.filter(
-                          (event) => event.timestamp.getTime() >= cutoff,
-                      );
-
-            const enabledColumns = columns
-                .filter((column) => visibleColumns[column.key])
-                .map((column) => column.key);
-
-            const exportRows = filteredEvents.map((event, index) => {
-                const row: Record<string, unknown> = { id: index + 1 };
-                enabledColumns.forEach((key) => {
-                    row[key] =
-                        key === "timestamp"
-                            ? event.timestamp.toISOString()
-                            : event[key];
-                });
-                return row;
-            });
-
-            const rangeSuffix = range;
-            const blob = new Blob([JSON.stringify(exportRows, null, 2)], {
-                type: "application/json",
-            });
-            const url = URL.createObjectURL(blob);
-            const anchor = document.createElement("a");
-            anchor.href = url;
-            anchor.download = `${projectId}-${rangeSuffix}.json`;
-            anchor.click();
-            URL.revokeObjectURL(url);
-            setExportDialogOpen(false);
-        } catch (error) {
-            setExportError(
-                error instanceof Error
-                    ? error.message
-                    : "Unable to export events right now.",
-            );
-        } finally {
-            setExporting(false);
-        }
+    const handleExportConfirm = (range: "day" | "week" | "month" | "all") => {
+        const enabledColumns = columns.filter(column => visibleColumns[column.key]).map(column => column.key);
+        if (!enabledColumns.length) { setExportError("Choose at least one column."); return; }
+        const params = new URLSearchParams({ range, columns: enabledColumns.join(",") });
+        if (searchTerm) params.set("search", searchTerm);
+        const anchor = document.createElement("a");
+        anchor.href = `/api/projects/${encodeURIComponent(projectId)}/export?${params}`;
+        anchor.download = `${projectId}-${range}.json`;
+        document.body.appendChild(anchor); anchor.click(); anchor.remove();
+        setExportDialogOpen(false);
     };
 
     const handleAddDomain = () => {
@@ -655,10 +491,8 @@ function RouteComponent() {
             return;
         }
         setNewDomainError(null);
-        addDomainMutation.mutate({
-            data: { projectId, value: normalized },
-        });
-        setNewDomain("");
+        setDomainError(null);
+        addDomainMutation.mutate({ data: { projectId, value: normalized } }, { onSuccess: () => setNewDomain("") });
     };
 
     const updateDomain = (id: string, updates: Partial<DomainRow>) => {
@@ -682,8 +516,8 @@ function RouteComponent() {
             badge: "Last 30 days",
         },
         {
-            label: "Mobile traffic",
-            value: overviewQuery.data?.mobileEvents ?? 0,
+            label: "Known mobile events",
+            value: overviewQuery.data?.classifiedEvents ? overviewQuery.data.mobileEvents : null,
             badge: "Last 30 days",
         },
         {
@@ -696,6 +530,8 @@ function RouteComponent() {
 
     return (
         <div className="space-y-6">
+            {deleteMutation.isError && <Alert role="alert"><AlertDescription>{deleteMutation.error.message}</AlertDescription></Alert>}
+
             <div className="flex flex-wrap items-center justify-between gap-4">
                 <div className="space-y-1">
                     <h1 className="text-2xl font-semibold tracking-tight">
@@ -705,7 +541,7 @@ function RouteComponent() {
                         Analyze traffic and manage project resources.
                     </p>
                 </div>
-                <Button variant="outline" onClick={() => window.history.back()}>
+                <Button variant="outline" onClick={() => navigate({ to: "/dashboard" })}>
                     <ArrowLeft className="h-4 w-4" />
                     Back to projects
                 </Button>
@@ -719,8 +555,19 @@ function RouteComponent() {
                 </TabsList>
 
                 <TabsContent value="overview" className="space-y-6">
+                    <QueryStatus loading={overviewQuery.isPending} error={overviewQuery.error} retry={() => overviewQuery.refetch()} />
+                    {overviewQuery.isSuccess && <Card><CardHeader><CardTitle>Get Started</CardTitle></CardHeader><CardContent className="space-y-3">
+                      <ol className="list-decimal pl-6 space-y-2">
+                        <li>Configure your domain in the Settings tab.</li>
+                        <li>Copy the script from Settings and add it once to your site's HTML.</li>
+                        <li>Open a page on that site. This check refreshes every 10 seconds.</li>
+                      </ol>
+                      {overviewQuery.data.lastEventAt ? <p role="status">Last event received: {new Date(overviewQuery.data.lastEventAt).toLocaleString()}</p> : <WaitingForFirstEvent />}
+                      {overviewQuery.data.diagnostics.length > 0 && <div><p>Rejected events today and yesterday:</p><ul>{overviewQuery.data.diagnostics.map(item => <li key={`${item.day}-${item.reason}`}>{item.reason}: {item.count}</li>)}</ul></div>}
+                    </CardContent></Card>}
+
                     <div className="grid gap-4 md:grid-cols-3">
-                        {stats.map((stat) => (
+                        {overviewQuery.isSuccess && stats.map((stat) => (
                             <Card key={stat.label} className="border-border/60">
                                 <CardHeader className="space-y-2">
                                     <CardTitle className="text-sm font-medium text-muted-foreground">
@@ -728,7 +575,7 @@ function RouteComponent() {
                                     </CardTitle>
                                     <div className="flex items-center justify-between">
                                         <span className="text-2xl font-semibold">
-                                            {numberFormatter.format(stat.value)}
+                                            {stat.value === null ? "Unknown" : numberFormatter.format(stat.value)}
                                         </span>
                                         <Badge variant="secondary">
                                             {stat.badge}
@@ -746,7 +593,7 @@ function RouteComponent() {
                                     Geographic distribution
                                 </CardTitle>
                                 <p className="text-sm text-muted-foreground">
-                                    Live view of incoming traffic by region.
+                                    Latest 30 geolocated document loads. Refreshes every 10 seconds while this tab is active.
                                 </p>
                             </div>
                             <Badge variant="outline" className="gap-1">
@@ -755,7 +602,8 @@ function RouteComponent() {
                             </Badge>
                         </CardHeader>
                         <CardContent className="p-0">
-                            <MapPanel points={locations} />
+                            <QueryStatus loading={locationsQuery.isPending} error={locationsQuery.error} retry={() => locationsQuery.refetch()} />
+                            {locationsQuery.isSuccess && (locations.length ? <MapPanel points={locations} /> : <p className="p-6">No geolocated events yet.</p>)}
                         </CardContent>
                     </Card>
                 </TabsContent>
@@ -767,7 +615,7 @@ function RouteComponent() {
                                 Event stream
                             </h2>
                             <p className="text-sm text-muted-foreground">
-                                Raw tracking events captured for this project.
+                                One event per initial document load. SPA route changes and sessions are not tracked.
                             </p>
                         </div>
                         <div className="flex flex-wrap items-center gap-2">
@@ -822,7 +670,8 @@ function RouteComponent() {
 
                     <Card className="border-border/60">
                         <CardContent className="p-0">
-                            {pagedEvents.length === 0 ? (
+                            <QueryStatus loading={eventsQuery.isPending} error={eventsQuery.error} retry={() => eventsQuery.refetch()} />
+                            {eventsQuery.isSuccess && pagedEvents.length === 0 ? (
                                 <Empty className="min-h-[240px] border-0">
                                     <EmptyHeader>
                                         <EmptyMedia variant="icon">
@@ -835,7 +684,7 @@ function RouteComponent() {
                                         </EmptyDescription>
                                     </EmptyHeader>
                                 </Empty>
-                            ) : (
+                            ) : eventsQuery.isSuccess ? (
                                 <Table>
                                     <TableHeader>
                                         <TableRow>
@@ -919,7 +768,7 @@ function RouteComponent() {
                                         ))}
                                     </TableBody>
                                 </Table>
-                            )}
+                            ) : null}
                         </CardContent>
                     </Card>
 
@@ -939,7 +788,7 @@ function RouteComponent() {
                                 onClick={() =>
                                     setPage((prev) => Math.max(1, prev - 1))
                                 }
-                                disabled={currentPage === 1}
+                                disabled={currentPage === 1 || eventsQuery.isFetching}
                             >
                                 <ChevronLeft className="h-4 w-4" />
                                 Prev
@@ -955,7 +804,7 @@ function RouteComponent() {
                                         Math.min(totalPages, prev + 1),
                                     )
                                 }
-                                disabled={currentPage === totalPages}
+                                disabled={currentPage === totalPages || eventsQuery.isFetching || eventsQuery.isPlaceholderData}
                             >
                                 Next
                                 <ChevronRight className="h-4 w-4" />
@@ -979,7 +828,7 @@ function RouteComponent() {
                             <div className="rounded-lg border border-border/60 bg-muted/30 px-4 py-3 text-sm">
                                 <code className="break-all">{embedCode}</code>
                             </div>
-                            <Button variant="outline" onClick={handleCopy}>
+                            <Button variant="outline" onClick={handleCopy} disabled={!embedCode}>
                                 <Copy className="h-4 w-4" />
                                 {copied ? "Copied" : "Copy script"}
                             </Button>
@@ -997,6 +846,9 @@ function RouteComponent() {
                             </p>
                         </CardHeader>
                         <CardContent className="space-y-4">
+                            <QueryStatus loading={domainsQuery.isPending} error={domainsQuery.error} retry={() => domainsQuery.refetch()} />
+                            {domainError && <Alert role="alert"><AlertDescription>{domainError}</AlertDescription></Alert>}
+                            {(addDomainMutation.isPending || updateDomainMutation.isPending || deleteDomainMutation.isPending) && <p role="status">Saving domains…</p>}
                             <form
                                 className="grid gap-3 md:grid-cols-[1fr_auto] md:items-end"
                                 onSubmit={(event) => {
@@ -1028,7 +880,7 @@ function RouteComponent() {
                                         }
                                     />
                                 </div>
-                                <Button type="submit" className="gap-2">
+                                <Button type="submit" className="gap-2" disabled={addDomainMutation.isPending || domainsQuery.isPending || domainsQuery.isError}>
                                     <Plus className="h-4 w-4" />
                                     Add
                                 </Button>
@@ -1050,6 +902,8 @@ function RouteComponent() {
                                             className="flex flex-wrap items-center gap-3 rounded-lg border border-border/60 bg-background/60 p-3"
                                         >
                                             <Input
+                                                aria-label="Allowed domain"
+                                                disabled={updateDomainMutation.isPending || deleteDomainMutation.isPending}
                                                 value={domain.value}
                                                 onChange={(event) =>
                                                     updateDomain(domain.id, {
@@ -1066,6 +920,7 @@ function RouteComponent() {
                                                         parseDomainValue(
                                                             normalized,
                                                         );
+                                                    if (normalized === domainsQuery.data?.find(item => item.id === domain.id)?.value) return;
                                                     if (!parsedValue.valid) {
                                                         return;
                                                     }
@@ -1093,6 +948,7 @@ function RouteComponent() {
                                                     : "Invalid"}
                                             </Badge>
                                             <Button
+                                                disabled={updateDomainMutation.isPending || deleteDomainMutation.isPending}
                                                 variant="ghost"
                                                 size="sm"
                                                 onClick={() =>
@@ -1115,6 +971,67 @@ function RouteComponent() {
                         </CardContent>
                     </Card>
 
+                    <Card className="border-border/60">
+                        <CardHeader>
+                            <CardTitle className="text-base">
+                                Data retention and deletion
+                            </CardTitle>
+                            <p className="text-sm text-muted-foreground">
+                                Choose how long to keep events.
+                            </p>
+                        </CardHeader>
+                        <CardContent className="space-y-4">
+                            <div className="max-w-xs space-y-2">
+                                <label
+                                    htmlFor="retention-days"
+                                    className="text-sm font-medium"
+                                >
+                                    Retention in days (1–365)
+                                </label>
+                                <Input
+                                    id="retention-days"
+                                    className="mt-2"
+                                    disabled={overviewQuery.isPending || overviewQuery.isError || retentionMutation.isPending}
+                                    type="number"
+                                    min={1}
+                                    max={365}
+                                    value={retentionDays}
+                                    onChange={event => setRetentionDays(Number(event.target.value))}
+                                />
+                            </div>
+                            <div className="flex flex-wrap gap-3">
+                                <Button
+                                    variant="outline"
+                                    disabled={retentionMutation.isPending || overviewQuery.isPending || overviewQuery.isError || !Number.isInteger(retentionDays) || retentionDays < 1 || retentionDays > 365}
+                                    onClick={() => retentionMutation.mutate({ data: { projectId, retentionDays } })}
+                                >
+                                    Save retention
+                                </Button>
+                                <Button
+                                    variant="destructive"
+                                    onClick={() => setPurgeDialogOpen(true)}
+                                >
+                                    Delete all events
+                                </Button>
+                            </div>
+                            {retentionMutation.isSuccess && (
+                                <p role="status" className="text-sm text-muted-foreground">
+                                    Retention saved. Expired events are hidden
+                                    immediately and removed during scheduled cleanup.
+                                </p>
+                            )}
+                            {retentionMutation.isError && (
+                                <p role="alert" className="text-sm text-destructive">
+                                    {retentionMutation.error.message}
+                                </p>
+                            )}
+                            {purgeMutation.isError && (
+                                <p role="alert" className="text-sm text-destructive">
+                                    {purgeMutation.error.message}
+                                </p>
+                            )}
+                        </CardContent>
+                    </Card>
                     <Card className="border-border/60">
                         <CardHeader>
                             <CardTitle className="text-base">
@@ -1260,19 +1177,18 @@ function RouteComponent() {
                         <Button
                             variant="outline"
                             onClick={() => setExportDialogOpen(false)}
-                            disabled={exporting}
                         >
                             Cancel
                         </Button>
                         <Button
                             onClick={() => handleExportConfirm(exportRange)}
-                            disabled={exporting}
                         >
-                            {exporting ? "Exporting..." : "Export JSON"}
+                            Export JSON
                         </Button>
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
+            <AlertDialog open={purgeDialogOpen} onOpenChange={setPurgeDialogOpen}><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Delete all events?</AlertDialogTitle><AlertDialogDescription>This permanently deletes this project's events and diagnostics. The project and allowed domains remain.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction disabled={purgeMutation.isPending} onClick={() => purgeMutation.mutate({ data: { projectId } })}>Delete events</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
             <AlertDialog
                 open={deleteDialogOpen}
                 onOpenChange={setDeleteDialogOpen}

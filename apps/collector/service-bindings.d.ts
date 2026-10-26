@@ -1,7 +1,4 @@
-interface ExampleWorkflowParmas {
-  dataToPassIn;
-}
-
-interface Env extends Cloudflare.Env {
-  DB: D1Database;
+interface Env extends BaseEnv {
+  /** Optional ip-api Pro key, set with wrangler secret put IP_API_KEY. */
+  IP_API_KEY?: string;
 }

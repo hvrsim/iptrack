@@ -13,6 +13,7 @@ import { Route as AuthRouteRouteImport } from './routes/_auth/route'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthDashboardIndexRouteImport } from './routes/_auth/dashboard/index'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth.$'
+import { Route as ApiProjectsProjectIdExportRouteImport } from './routes/api/projects/$projectId/export'
 import { Route as AuthDashboardProjectsProjectIdIndexRouteImport } from './routes/_auth/dashboard/projects/$projectId/index'
 
 const AuthRouteRoute = AuthRouteRouteImport.update({
@@ -34,6 +35,12 @@ const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   path: '/api/auth/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiProjectsProjectIdExportRoute =
+  ApiProjectsProjectIdExportRouteImport.update({
+    id: '/api/projects/$projectId/export',
+    path: '/api/projects/$projectId/export',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const AuthDashboardProjectsProjectIdIndexRoute =
   AuthDashboardProjectsProjectIdIndexRouteImport.update({
     id: '/dashboard/projects/$projectId/',
@@ -45,12 +52,14 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/dashboard': typeof AuthDashboardIndexRoute
+  '/api/projects/$projectId/export': typeof ApiProjectsProjectIdExportRoute
   '/dashboard/projects/$projectId': typeof AuthDashboardProjectsProjectIdIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/dashboard': typeof AuthDashboardIndexRoute
+  '/api/projects/$projectId/export': typeof ApiProjectsProjectIdExportRoute
   '/dashboard/projects/$projectId': typeof AuthDashboardProjectsProjectIdIndexRoute
 }
 export interface FileRoutesById {
@@ -59,6 +68,7 @@ export interface FileRoutesById {
   '/_auth': typeof AuthRouteRouteWithChildren
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/_auth/dashboard/': typeof AuthDashboardIndexRoute
+  '/api/projects/$projectId/export': typeof ApiProjectsProjectIdExportRoute
   '/_auth/dashboard/projects/$projectId/': typeof AuthDashboardProjectsProjectIdIndexRoute
 }
 export interface FileRouteTypes {
@@ -67,15 +77,22 @@ export interface FileRouteTypes {
     | '/'
     | '/api/auth/$'
     | '/dashboard'
+    | '/api/projects/$projectId/export'
     | '/dashboard/projects/$projectId'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/api/auth/$' | '/dashboard' | '/dashboard/projects/$projectId'
+  to:
+    | '/'
+    | '/api/auth/$'
+    | '/dashboard'
+    | '/api/projects/$projectId/export'
+    | '/dashboard/projects/$projectId'
   id:
     | '__root__'
     | '/'
     | '/_auth'
     | '/api/auth/$'
     | '/_auth/dashboard/'
+    | '/api/projects/$projectId/export'
     | '/_auth/dashboard/projects/$projectId/'
   fileRoutesById: FileRoutesById
 }
@@ -83,6 +100,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthRouteRoute: typeof AuthRouteRouteWithChildren
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
+  ApiProjectsProjectIdExportRoute: typeof ApiProjectsProjectIdExportRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -115,6 +133,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAuthSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/projects/$projectId/export': {
+      id: '/api/projects/$projectId/export'
+      path: '/api/projects/$projectId/export'
+      fullPath: '/api/projects/$projectId/export'
+      preLoaderRoute: typeof ApiProjectsProjectIdExportRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/_auth/dashboard/projects/$projectId/': {
       id: '/_auth/dashboard/projects/$projectId/'
       path: '/dashboard/projects/$projectId'
@@ -144,6 +169,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthRouteRoute: AuthRouteRouteWithChildren,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
+  ApiProjectsProjectIdExportRoute: ApiProjectsProjectIdExportRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

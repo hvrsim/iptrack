@@ -1,5 +1,5 @@
 import { createBetterAuth } from "@/auth/setup";
-import { getDb } from "@/database/setup";
+import { initDatabase } from "@/database/setup";
 import {
   auth_account,
   auth_session,
@@ -13,7 +13,7 @@ let betterAuth: ReturnType<typeof createBetterAuth>;
 export function setAuth(
   config: Omit<Parameters<typeof createBetterAuth>[0], "database"> & {
     adapter: {
-      drizzleDb: ReturnType<typeof getDb>;
+      drizzleDb: ReturnType<typeof initDatabase>;
       provider: Parameters<typeof drizzleAdapter>[1]["provider"];
     };
   },

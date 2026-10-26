@@ -51,19 +51,7 @@ export function NavigationBar() {
     return () => window.removeEventListener("scroll", handleScroll);
   }, []);
 
-  const handleSmoothScroll = (elementId: string) => {
-    const element = document.getElementById(elementId);
-    if (element) {
-      element.scrollIntoView({
-        behavior: "smooth",
-        block: "start",
-      });
-    }
-  };
-
-  const handleNavClick = (item: NavigationItem) => {
-    setIsOpen(false);
-  };
+  const handleNavClick = () => { setIsOpen(false); };
 
   return (
     <nav
@@ -110,7 +98,7 @@ export function NavigationBar() {
                 ) : (
                   <Link
                     to={item.href}
-                    onClick={() => handleNavClick(item)}
+                    onClick={() => handleNavClick()}
                     className="px-4 py-2 rounded-lg text-sm font-medium text-muted-foreground hover:text-foreground transition-all duration-300 hover:bg-accent/50 block"
                   >
                     {item.label}
@@ -204,7 +192,7 @@ export function NavigationBar() {
                       ) : (
                         <Link
                           to={item.href}
-                          onClick={() => handleNavClick(item)}
+                          onClick={() => handleNavClick()}
                           className="flex items-center w-full px-4 py-3 rounded-lg text-sm font-medium text-muted-foreground hover:text-foreground transition-all duration-300 hover:bg-accent/50 text-left"
                         >
                           {item.label}
